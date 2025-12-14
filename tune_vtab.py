@@ -252,6 +252,10 @@ def get_lrwd_range(args):
         ]
         wd_range = [0.01, 0.001, 0.0001, 0.0]
 
+    elif args.train_type == "fpt":
+        lr_range = [25.0]
+        wd_range = [0.001]
+
     elif args.train_type == "prompt_largerlr":
         lr_range = [
             500, 1000, 250., 100.0,

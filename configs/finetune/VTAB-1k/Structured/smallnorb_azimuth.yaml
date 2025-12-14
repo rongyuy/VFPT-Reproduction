@@ -1,7 +1,7 @@
 _BASE_: "../../../base-finetune.yaml"
 RUN_N_TIMES: 1
 DATA:
-  NAME: vtab-smallnorb(predicted_attribute="label_azimuth")
+  NAME: "vtab-smallnorb(predicted_attribute=label_azimuth)"
   DATAPATH: "/shared/kgcoe-research/spl/VTAB-1k/Structured/"  #TODO: need to specify here
   NUMBER_CLASSES: 18
   MULTILABEL: False
