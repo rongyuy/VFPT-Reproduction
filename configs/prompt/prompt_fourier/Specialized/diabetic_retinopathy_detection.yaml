@@ -1,7 +1,7 @@
 _BASE_: "../../../base-prompt_fourier.yaml"
 RUN_N_TIMES: 1
 DATA:
-  NAME: vtab-diabetic_retinopathy(config="btgraham-300")
+  NAME: "vtab-diabetic_retinopathy(config=btgraham-300)"
   DATAPATH: "/shared/rc/spl/VTAB-1k/Specialized/"  #TODO: need to specify here
   NUMBER_CLASSES: 5
   MULTILABEL: False

@@ -1,9 +1,9 @@
 _BASE_: "../../../base-prompt_fourier.yaml"
 RUN_N_TIMES: 1
 DATA:
-  NAME: "vtab-resisc45"
-  DATAPATH: "/shared/rc/spl/VTAB-1k/Specialized/"  #TODO: need to specify here
-  NUMBER_CLASSES: 45
+  NAME: "vtab-eurosat"
+  DATAPATH: "/disks/sata2/kaiqian/workspace/VFPT/data/vtab-1k/"  #TODO: need to specify here
+  NUMBER_CLASSES: 10
   MULTILABEL: False
 MODEL:
   TYPE: "vit"

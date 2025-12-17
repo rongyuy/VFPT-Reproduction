@@ -18,6 +18,7 @@ from scipy import ndimage
 
 from ..vit_backbones.vit import CONFIGS, Transformer, VisionTransformer, np2th
 from ...utils import logging
+import torch.nn.functional as F
 
 logger = logging.get_logger("visual_prompt")
 
@@ -31,28 +32,74 @@ logger = logging.get_logger("visual_prompt")
 #         return handle
 
 class FNetBlock(nn.Module):
-  def __init__(self):
-    super().__init__()
+    """ 2D Transform: on both Sequence and Hidden dimensions """
+    def __init__(self, mode='fft', use_gating=False, dim=None):
+        super().__init__()
+        self.mode = mode
+        self.use_gating = use_gating
+        if self.use_gating:
+            assert dim is not None, "Dim must be provided for Gating"
+            self.gate = SpectrumGating(dim)
 
-  def forward(self, x):
-    x = torch.fft.fft(torch.fft.fft(x, dim=-1), dim=-2).real
-    return x
+    def forward(self, x):
+        # x: [B, N, D]
+        if self.mode == 'dct':
+            # 2D DCT: 先对最后一维(Hidden)做DCT
+            x = dct(x)
+            # 再对倒数第二维(Sequence)做DCT -> 需要转置
+            x = x.transpose(-1, -2)
+            x = dct(x)
+            x = x.transpose(-1, -2)
+        else:
+            # Default VFPT: 2D FFT -> Real
+            x = torch.fft.fft(torch.fft.fft(x, dim=-1), dim=-2).real
+        
+        if self.use_gating:
+            x = self.gate(x)
+        return x
 
 class FNetBlock_hidden(nn.Module):
-  def __init__(self):
-    super().__init__()
+    """ 1D Transform: only on Hidden dimension """
+    def __init__(self, mode='fft', use_gating=False, dim=None):
+        super().__init__()
+        self.mode = mode
+        self.use_gating = use_gating
+        if self.use_gating:
+            assert dim is not None
+            self.gate = SpectrumGating(dim)
 
-  def forward(self, x):
-    x = torch.fft.fft(x, dim=-1).real
-    return x
+    def forward(self, x):
+        if self.mode == 'dct':
+            x = dct(x)
+        else:
+            x = torch.fft.fft(x, dim=-1).real
+            
+        if self.use_gating:
+            x = self.gate(x)
+        return x
 
 class FNetBlock_sequence(nn.Module):
-  def __init__(self):
-    super().__init__()
+    """ 1D Transform: only on Sequence dimension """
+    def __init__(self, mode='fft', use_gating=False, dim=None):
+        super().__init__()
+        self.mode = mode
+        self.use_gating = use_gating
+        if self.use_gating:
+            assert dim is not None
+            self.gate = SpectrumGating(dim)
 
-  def forward(self, x):
-    x = torch.fft.fft(x, dim=-2).real
-    return x
+    def forward(self, x):
+        if self.mode == 'dct':
+            # DCT on sequence dim (dim=-2)
+            x = x.transpose(-1, -2)
+            x = dct(x)
+            x = x.transpose(-1, -2)
+        else:
+            x = torch.fft.fft(x, dim=-2).real
+            
+        if self.use_gating:
+            x = self.gate(x)
+        return x
 
 class PromptedTransformer_Fourier(Transformer):
     def __init__(self, prompt_config, config, img_size, vis):
@@ -72,15 +119,22 @@ class PromptedTransformer_Fourier(Transformer):
         num_tokens = self.prompt_config.NUM_TOKENS
         self.num_tokens = num_tokens  # number of prompted tokens
 
+        # --- 修改开始：读取配置并实例化新的 Block ---
+        # 默认值为 'fft' 和 False，保证兼容旧配置
+        mode = getattr(self.prompt_config, 'FOURIER_MODE', 'fft')
+        use_gating = getattr(self.prompt_config, 'USE_GATING', False)
+        hidden_dim = config.hidden_size
+
         if self.prompt_config.FOURIER_TYPE == "fixed_linear" or self.prompt_config.FOURIER_TYPE == "linear":
             self.FT = nn.Linear(config.hidden_size, config.hidden_size)
             nn.init.kaiming_normal_(self.FT.weight, a=0, mode='fan_out')
         elif self.prompt_config.FOURIER_DIMENSION == "sequence":
-            self.FT = FNetBlock_sequence()
+            self.FT = FNetBlock_sequence(mode=mode, use_gating=use_gating, dim=hidden_dim)
         elif self.prompt_config.FOURIER_DIMENSION == "hidden":
-            self.FT = FNetBlock_hidden()
+            self.FT = FNetBlock_hidden(mode=mode, use_gating=use_gating, dim=hidden_dim)
         elif self.prompt_config.FOURIER_DIMENSION == "all":
-            self.FT = FNetBlock()
+            self.FT = FNetBlock(mode=mode, use_gating=use_gating, dim=hidden_dim)
+        # --- 修改结束 ---
         
         if self.prompt_config.FOURIER_PERCENTAGE != 0.0:
             self.fourier_num_tokens = math.floor(self.prompt_config.NUM_TOKENS * self.prompt_config.FOURIER_PERCENTAGE)
@@ -588,6 +642,60 @@ def vis_attn(x, attention_maps, pn, name):
         visualize_grid_to_grid_with_cls(attention_map.cpu().detach().numpy().mean(axis=0), 0, image, pth=f"./img_{str(i)}")
     
 
+import torch.nn.functional as F
+
+# --- 新增：DCT 变换实现 (基于 FFT) ---
+# 参考自 torchaudio 或 scipy 的实现原理，DCT-II 是最常用的
+def dct(x, norm=None):
+    """
+    Discrete Cosine Transform, Type II (a.k.a. the DCT)
+    For 1D signals, dimension defaults to -1.
+    """
+    x_shape = x.shape
+    N = x_shape[-1]
+    x = x.contiguous().view(-1, N)
+
+    v = torch.cat([x[:, ::2], x[:, 1::2].flip([1])], dim=1)
+    Vc = torch.fft.fft(v, dim=1)
+
+    k = - torch.arange(N, dtype=x.dtype, device=x.device)[None, :] * np.pi / (2 * N)
+    W_r = torch.cos(k)
+    W_i = torch.sin(k)
+
+    V = Vc.real * W_r - Vc.imag * W_i
+
+    if norm == 'ortho':
+        V[:, 0] /= np.sqrt(N) * 2
+        V[:, 1:] /= np.sqrt(N / 2) * 2
+
+    V = 2 * V.view(*x_shape)
+
+    if norm == 'ortho':
+        # 正交归一化，使得 DCT 变换能量守恒
+        # 通常 DCT-II ortho 形式系数不同，这里简化处理，
+        # 很多深度学习实现里并不严格做 ortho，只要可逆即可。
+        # 为了数值稳定性，建议不做复杂的 scaling 或者简单除以 sqrt(N)
+        pass 
+        
+    return V
+
+# --- 新增：Gating 模块 ---
+class SpectrumGating(nn.Module):
+    def __init__(self, dim, reduction=4):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(dim, dim // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(dim // reduction, dim, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        # x shape: [B, N, D] or [B, D]
+        # 我们对最后那个维度(Embedding Dim)或者 Token 维度进行门控
+        # 假设是在频域上做门控，通常是对 Channel/Hidden dim 进行筛选
+        weight = self.fc(x)
+        return x * weight
 
     
     

@@ -82,6 +82,7 @@ _C.MODEL.PROMPT.SAVE_FOR_EACH_EPOCH = False
 _C.MODEL.PROMPT.FT_PT_MIXED = False # if true, will do mixed pt+ft training
 _C.MODEL.PROMPT.POSITION_EMBEDDINGS = True
 
+
 # ----------------------------------------------------------------------
 # Prompt with attention sink options
 # ----------------------------------------------------------------------
@@ -169,6 +170,11 @@ _C.MODEL.PROMPT_FOURIER.VIS = False
 _C.MODEL.PROMPT_FOURIER.VIS_JSON = ''
 _C.MODEL.PROMPT_FOURIER.VIS_JSON_PROMPT = ''
 _C.MODEL.PROMPT_FOURIER.VIS_JSON_FOURIER = ''
+
+# --- 新增开始 ---
+_C.MODEL.PROMPT_FOURIER.FOURIER_MODE = "fft"   # 注册变换模式参数
+_C.MODEL.PROMPT_FOURIER.USE_GATING = False     # 注册门控开关参数
+# --- 新增结束 ---
 
 # ----------------------------------------------------------------------
 # adapter options
